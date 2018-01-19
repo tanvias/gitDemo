@@ -1,0 +1,50 @@
+Hello world...
+
+PFB
+
+public static void syncSalesStageOnPartnerOpportunity(List<Opportunity> oldOppList, List<Opportunity> newOppList){
+		boolean isQuoteEnabled = CSM_AccessController.hasField(REN_Constants.OBJ_OPPORTUNITY, CHL_Constants.OBJ_OPP_SYNCE_QUOTE_ID);
+		Set<Id> syncedQuoteIdSet = new Set<Id>(); 
+		List<CHL_Sales_Stage_Mapping__c> salesStageMappingList = CHL_SalesStageMappingDataAccess.getSalesStageMapping();
+		if(salesStageMappingList == null || salesStageMappingList.isEmpty()){
+			return;
+		}
+		Set<String> uniqueSalesStageMappingSet = new Set<String>(); // Key = CHL_Master_Opportunity_Sales_Stage__c
+		Map<String, CHL_Sales_Stage_Mapping__c> salesStageMappingMap = new Map<String, CHL_Sales_Stage_Mapping__c>(); // Key = CHL_Master_Opportunity_Sales_Stage__c : CHL_Partner_Opportunity_Type__c
+		for(CHL_Sales_Stage_Mapping__c mapObj: salesStageMappingList){
+			salesStageMappingMap.put(mapObj.CHL_Master_Opportunity_Sales_Stage__c + ':' + mapObj.CHL_Partner_Opportunity_Type__c, mapObj);
+			uniqueSalesStageMappingSet.add(mapObj.CHL_Master_Opportunity_Sales_Stage__c);
+            
+		}
+		system.debug('' + '\n\n~~~~~~~~~uniqueSalesStageMappingSet:' + uniqueSalesStageMappingSet);
+		Map<Id, Opportunity> newRecordsMap = new Map<Id, Opportunity>(newOppList);
+		Set<String> anyOneFieldChangedSet = new Set<String>{REN_Constants.OBJ_RC_OPPORTUNITY_STAGE};
+		for(Opportunity oldOpp: oldOppList){
+			Opportunity newOpp = newRecordsMap.get(oldOpp.id);
+			system.debug(oldOpp + '\n\n~~~~~~~~~newOpp:' + newOpp);
+			system.debug(REN_Util.isFieldChanged(oldOpp, newOpp, anyOneFieldChangedSet) + '\n\n~~~~~~~~~Check To Remove:' + uniqueSalesStageMappingSet.contains(newOpp.StageName));
+			if(REN_Util.isFieldChanged(oldOpp, newOpp, anyOneFieldChangedSet) && uniqueSalesStageMappingSet.contains(newOpp.StageName)){
+				//This Opportunity is required to update all its PO.
+				if(isQuoteEnabled && newOpp.get(CHL_Constants.OBJ_OPP_SYNCE_QUOTE_ID) != null){
+					syncedQuoteIdSet.add((ID)newOpp.get(CHL_Constants.OBJ_OPP_SYNCE_QUOTE_ID));
+				}
+			}else{
+				newRecordsMap.remove(oldOpp.id);
+			}
+		}
+		if(!newRecordsMap.isEmpty()){
+			Map<Id, Id> winningPartnerOpportunityMap = new Map<Id, Id>(); // Key=OpportunityId, value= Winning Partner Opportunity ID
+			if(isQuoteEnabled){
+				if(CSM_AccessController.hasField(CHL_Constants.OBJ_QUOTE, CHL_Util.quoteExtnNameSpace + CHL_Constants.OBJ_PARTNER_OPPORTUNITY)){
+					List<SObject> quoteList = CHL_QuoteDataAccess.getSyncedQuotesById(syncedQuoteIdSet); //getQuoteByIds
+					for(sObject quoteObj: quoteList){
+						if(quoteObj.get(CHL_Util.quoteExtnNameSpace + CHL_Constants.OBJ_PARTNER_OPPORTUNITY) != null){
+							winningPartnerOpportunityMap.put((ID)quoteObj.get(CHL_Constants.STR_OPPOTUNITYID), (ID)quoteObj.get(CHL_Util.quoteExtnNameSpace + CHL_Constants.OBJ_PARTNER_OPPORTUNITY));
+						}
+					}
+				}
+			}
+			updatePartnerOpportunities(newRecordsMap, winningPartnerOpportunityMap, salesStageMappingMap);
+		}
+	}
+    
